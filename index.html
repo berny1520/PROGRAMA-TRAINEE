@@ -9,8 +9,8 @@
 </style>
 </head><body>
 <header><div class="top"><div class="brand"><div class="logo">OT</div><div><h1>Sistema PRO Operador Trainee Multi-Equipo</h1><div class="sub">Matriz de formación · Observación en terreno · Evaluación final · Cierre de brechas</div></div></div><div class="actions"><button onclick="saveAll()">Guardar</button><button class="secondary" onclick="exportJSON()">Exportar respaldo</button><button class="warn" onclick="window.print()">Imprimir / PDF</button></div></div></header>
-<main><div class="grid"><aside class="side"><label>Equipo</label><select id="equipo" onchange="renderAll()"></select><label>Operador</label><input id="operador" placeholder="Nombre operador trainee" oninput="saveAll(false)"><label>RUN</label><input id="run" placeholder="12.345.678-9" oninput="saveAll(false)"><label>Instructor</label><input id="instructor" placeholder="Instructor / Operador senior" oninput="saveAll(false)"><label>Turno</label><select id="turno" onchange="saveAll(false)"><option>A</option><option>B</option><option>Día</option><option>Noche</option></select><label>Fecha</label><input type="date" id="fecha" onchange="saveAll(false)"><hr style="border-color:var(--line);border-style:solid;border-width:1px 0 0;margin:14px 0"><div class="tabs no-print"><button class="tab active" onclick="showTab('dashboard',this)">Dashboard</button><button class="tab" onclick="showTab('plan',this)">Plan modular</button><button class="tab" onclick="showTab('pauta',this)">Pauta observación</button><button class="tab" onclick="showTab('eval',this)">Evaluación final</button><button class="tab" onclick="showTab('brechas',this)">Brechas y acciones</button></div></aside><section class="content">
-<div id="dashboard" class="view"></div><div id="plan" class="view hidden"></div><div id="pauta" class="view hidden"></div><div id="eval" class="view hidden"></div><div id="brechas" class="view hidden"></div>
+<main><div class="grid"><aside class="side"><label>Equipo</label><select id="equipo" onchange="renderAll()"></select><label>Operador</label><input id="operador" placeholder="Nombre operador trainee" oninput="saveAll(false)"><label>RUN</label><input id="run" placeholder="12.345.678-9" oninput="saveAll(false)"><label>Instructor</label><input id="instructor" placeholder="Instructor / Operador senior" oninput="saveAll(false)"><label>Turno</label><select id="turno" onchange="saveAll(false)"><option>A</option><option>B</option><option>Día</option><option>Noche</option></select><label>Fecha</label><input type="date" id="fecha" onchange="saveAll(false)"><hr style="border-color:var(--line);border-style:solid;border-width:1px 0 0;margin:14px 0"><div class="tabs no-print"><button class="tab active" onclick="showTab('dashboard',this)">Dashboard</button><button class="tab" onclick="showTab('plan',this)">Plan modular</button><button class="tab" onclick="showTab('pauta',this)">Pauta observación</button><button class="tab" onclick="showTab('evaluacionFinal',this)">Evaluación final</button><button class="tab" onclick="showTab('brechas',this)">Brechas y acciones</button></div></aside><section class="content">
+<div id="dashboard" class="view"></div><div id="plan" class="view hidden"></div><div id="pauta" class="view hidden"></div><div id="evaluacionFinal" class="view hidden"></div><div id="brechas" class="view hidden"></div>
 </section></div></main>
 <script>
 const EQUIPOS=[
@@ -31,13 +31,189 @@ let data=JSON.parse(localStorage.getItem('traineePro')||'{}');
 function init(){equipo.innerHTML=EQUIPOS.map(x=>`<option>${x.e}</option>`).join(''); fecha.valueAsDate=new Date(); ['operador','run','instructor','turno','fecha','equipo'].forEach(id=>{if(data[id]) document.getElementById(id).value=data[id]}); renderAll();} init();
 function showTab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');}
 function saveAll(toast=true){['operador','run','instructor','turno','fecha','equipo'].forEach(id=>data[id]=document.getElementById(id).value); localStorage.setItem('traineePro',JSON.stringify(data)); renderDashboard(); if(toast) alert('Registro guardado en este dispositivo.');}
-function getScores(){return CRITERIOS.map((_,i)=>Number(data['c'+i]||0));} function avg(){let a=getScores(); return Math.round((a.reduce((x,y)=>x+y,0)/(a.length*4))*100)||0} function theoretical(){return Number(data.teorica||0)} function attendance(){return Number(data.asistencia||0)} function estado(){let p=avg(),t=theoretical(),a=attendance(); if(p>=85&&t>=5&&a>=90)return ['APTO','status-ok']; if(p>=75&&t>=4&&a>=80)return ['APTO CON OBSERVACIONES','status-warn']; return ['NO APTO / REENTRENAR','status-bad'];}
-function renderAll(){saveAll(false); renderDashboard(); renderPlan(); renderPauta(); renderEval(); renderBrechas();}
+
+function getScores(){return CRITERIOS.map((_,i)=>Number(data['c'+i]||0));}
+function avg(){
+  let a=getScores();
+  return Math.round((a.reduce((x,y)=>x+y,0)/(a.length*4))*100)||0;
+}
+function attendance(){return Number(data.asistencia||0);}
+function theoretical(){
+  // Nota teórica automática. Si no se ingresa nota manual, usa el % teórico automático.
+  if(data.notaTeoricaManual && Number(data.notaTeoricaManual)>0) return Number(data.notaTeoricaManual);
+  return notaEscala7(Number(data.teoricaAutoPct||0));
+}
+function notaEscala7(pct){
+  pct=Math.max(0,Math.min(100,Number(pct)||0));
+  // Escala chilena con 60% de exigencia: 60% = 4.0; 100% = 7.0
+  if(pct<60) return Math.max(1, 1 + (pct/60)*3);
+  return 4 + ((pct-60)/40)*3;
+}
+function pctDesdeNota(nota){
+  nota=Number(nota)||0;
+  if(nota<4) return ((nota-1)/3)*60;
+  return 60 + ((nota-4)/3)*40;
+}
+function notaFinalAuto(){
+  const practica=avg();                         // 50%
+  const teoricaPct=Number(data.teoricaAutoPct||pctDesdeNota(theoretical())||0); // 30%
+  const asistenciaPct=attendance();             // 20%
+  const finalPct=(practica*0.50)+(teoricaPct*0.30)+(asistenciaPct*0.20);
+  return {
+    pct: Math.round(finalPct),
+    nota: notaEscala7(finalPct)
+  };
+}
+function estado(){
+  const nf=notaFinalAuto();
+  let p=avg(),t=theoretical(),a=attendance();
+  if(nf.nota>=5.0 && p>=85 && t>=5 && a>=90)return ['APTO','status-ok'];
+  if(nf.nota>=4.0 && p>=75 && t>=4 && a>=80)return ['APTO CON OBSERVACIONES','status-warn'];
+  return ['NO APTO / REENTRENAR','status-bad'];
+}
+
+function renderAll(){
+  saveAll(false);
+  renderDashboard();
+  renderPlan();
+  renderPauta();
+  renderEval();
+  renderBrechas();
+}
 function selected(){return EQUIPOS.find(x=>x.e===equipo.value)||EQUIPOS[0]}
-function renderDashboard(){let x=selected(), st=estado(); dashboard.innerHTML=`<div class="card"><span class="pill">${x.f}</span><h2>${x.e} · ${x.mod}</h2><p class="sub">Foco operacional: ${x.foco}</p><p class="sub">Riesgos críticos: ${x.riesgo}</p><div class="kpis"><div class="kpi"><b>${attendance()}%</b><span>Asistencia</span></div><div class="kpi"><b>${theoretical().toFixed(1)}</b><span>Nota teórica</span></div><div class="kpi"><b>${avg()}%</b><span>Cumplimiento práctico</span></div><div class="kpi"><b class="${st[1]}">${st[0]}</b><span>Resultado final</span></div></div></div><div class="card"><h3>Datos del registro</h3><table><tr><th>Operador</th><td>${operador.value||'Sin completar'}</td><th>RUN</th><td>${run.value||'Sin completar'}</td></tr><tr><th>Instructor</th><td>${instructor.value||'Sin completar'}</td><th>Fecha / Turno</th><td>${fecha.value||''} · ${turno.value}</td></tr></table></div>`}
+function renderDashboard(){let x=selected(), st=estado(); dashboard.innerHTML=`<div class="card"><span class="pill">${x.f}</span><h2>${x.e} · ${x.mod}</h2><p class="sub">Foco operacional: ${x.foco}</p><p class="sub">Riesgos críticos: ${x.riesgo}</p><div class="kpis"><div class="kpi"><b>${attendance()}%</b><span>Asistencia</span></div><div class="kpi"><b>${theoretical().toFixed(1)}</b><span>Nota teórica auto</span></div><div class="kpi"><b>${avg()}%</b><span>Cumplimiento práctico</span></div><div class="kpi"><b>${notaFinalAuto().nota.toFixed(1)}</b><span>Nota final automática</span></div></div><div style="margin-top:12px"><span class="pill"><b class="${st[1]}">${st[0]}</b></span></div></div><div class="card"><h3>Datos del registro</h3><table><tr><th>Operador</th><td>${operador.value||'Sin completar'}</td><th>RUN</th><td>${run.value||'Sin completar'}</td></tr><tr><th>Instructor</th><td>${instructor.value||'Sin completar'}</td><th>Fecha / Turno</th><td>${fecha.value||''} · ${turno.value}</td></tr></table></div>`}
 function renderPlan(){plan.innerHTML=`<div class="card"><h2>Plan modular base para todos los equipos</h2><table><thead><tr><th>Mód.</th><th>Nombre</th><th>Horas</th><th>Resultado esperado</th><th>Evaluación</th><th>Peso</th></tr></thead><tbody>${MODULOS.map(m=>`<tr><td>${m[0]}</td><td>${m[1]}</td><td>${m[2]}</td><td>${m[3]}</td><td>${m[4]}</td><td>${m[5]}</td></tr>`).join('')}</tbody></table></div><div class="card"><h3>Módulo específico seleccionado</h3><p><b>${selected().mod}:</b> ${selected().foco}</p><p class="footer-note">Este módulo se adapta al equipo seleccionado, manteniendo el mismo estándar de aprobación: asistencia ≥90%, nota teórica ≥5,0 y práctica ≥85%.</p></div>`}
 function renderPauta(){pauta.innerHTML=`<div class="card"><h2>Pauta de observación en terreno</h2>${CRITERIOS.map((c,i)=>`<div class="scoregrid"><div><b>${i+1}. ${c}</b><br><small>${DESC[i]}</small></div><select onchange="data['c${i}']=this.value; saveAll(false); renderAll()"><option value="0">Sin evaluar</option><option value="1" ${data['c'+i]==1?'selected':''}>1 · Deficiente</option><option value="2" ${data['c'+i]==2?'selected':''}>2 · Básico</option><option value="3" ${data['c'+i]==3?'selected':''}>3 · Competente</option><option value="4" ${data['c'+i]==4?'selected':''}>4 · Autónomo</option></select><span class="pill">${Math.round((Number(data['c'+i]||0)/4)*100)}%</span></div>`).join('')}</div>`}
-function renderEval(){eval.innerHTML=`<div class="card"><h2>Evaluación final</h2><div class="row3"><div><label>% asistencia</label><input type="number" min="0" max="100" id="asistencia" value="${data.asistencia||''}" oninput="data.asistencia=this.value;saveAll(false);renderAll()"></div><div><label>Nota teórica</label><input type="number" step="0.1" min="1" max="7" id="teorica" value="${data.teorica||''}" oninput="data.teorica=this.value;saveAll(false);renderAll()"></div><div><label>Estado equipo</label><select onchange="data.estadoEquipo=this.value;saveAll(false)"><option>Operativo</option><option>Disponible</option><option>En mantenimiento</option><option>Puesta en marcha</option><option>F/S</option><option>Condicionado</option></select></div></div><label>Observaciones del instructor</label><textarea oninput="data.obs=this.value;saveAll(false)" placeholder="Fortalezas, brechas, restricciones y recomendación de liberación operacional.">${data.obs||''}</textarea></div>`}
+
+
+function renderEval(){
+const st=estado();
+const pct=avg();
+const asis=attendance();
+const teo=theoretical();
+const nf=notaFinalAuto();
+const equipoSel=selected();
+
+document.getElementById('evaluacionFinal').innerHTML=`
+<div class="card">
+  <h2>Evaluación final automática · ${equipoSel.e}</h2>
+  <p class="sub">La nota se calcula automáticamente con ponderación: práctica 50%, teoría 30% y asistencia 20%. Escala chilena 1,0 a 7,0 con 60% de exigencia.</p>
+
+  <div class="kpis">
+    <div class="kpi"><b>${pct}%</b><span>Práctica en terreno · 50%</span></div>
+    <div class="kpi"><b>${teo.toFixed(1)}</b><span>Teoría automática · 30%</span></div>
+    <div class="kpi"><b>${asis}%</b><span>Asistencia · 20%</span></div>
+    <div class="kpi"><b class="${st[1]}">${nf.nota.toFixed(1)}</b><span>Nota final automática</span></div>
+  </div>
+  <div style="margin-top:12px">
+    <span class="pill">Resultado: <b class="${st[1]}">${st[0]}</b></span>
+    <span class="pill">Cumplimiento final: ${nf.pct}%</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Datos para cálculo automático</h3>
+  <div class="row3">
+    <div>
+      <label>% asistencia</label>
+      <input type="number" min="0" max="100" id="asistencia" value="${data.asistencia||''}" placeholder="Ej: 95"
+      oninput="data.asistencia=this.value;saveAll(false);renderAll()">
+    </div>
+    <div>
+      <label>% evaluación teórica</label>
+      <input type="number" min="0" max="100" id="teoricaAutoPct" value="${data.teoricaAutoPct||''}" placeholder="Ej: 86"
+      oninput="data.teoricaAutoPct=this.value;data.notaTeoricaManual='';saveAll(false);renderAll()">
+    </div>
+    <div>
+      <label>Nota teórica manual opcional</label>
+      <input type="number" step="0.1" min="1" max="7" id="notaTeoricaManual" value="${data.notaTeoricaManual||''}" placeholder="Opcional: Ej 5.8"
+      oninput="data.notaTeoricaManual=this.value;saveAll(false);renderAll()">
+    </div>
+  </div>
+
+  <div class="row3">
+    <div>
+      <label>Estado equipo</label>
+      <select id="estadoEquipo" onchange="data.estadoEquipo=this.value;saveAll(false);renderAll()">
+        <option ${data.estadoEquipo==='Operativo'?'selected':''}>Operativo</option>
+        <option ${data.estadoEquipo==='Disponible'?'selected':''}>Disponible</option>
+        <option ${data.estadoEquipo==='En mantenimiento'?'selected':''}>En mantenimiento</option>
+        <option ${data.estadoEquipo==='Puesta en marcha'?'selected':''}>Puesta en marcha</option>
+        <option ${data.estadoEquipo==='F/S'?'selected':''}>F/S</option>
+        <option ${data.estadoEquipo==='Condicionado'?'selected':''}>Condicionado</option>
+      </select>
+    </div>
+    <div>
+      <label>Exigencia</label>
+      <input value="60% = nota 4,0" readonly>
+    </div>
+    <div>
+      <label>Fórmula aplicada</label>
+      <input value="Práctica 50% + Teoría 30% + Asistencia 20%" readonly>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Detalle de pauta práctica</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Criterio</th>
+        <th>Nivel</th>
+        <th>%</th>
+        <th>Condición</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${CRITERIOS.map((c,i)=>{
+        const v=Number(data['c'+i]||0);
+        const p=Math.round((v/4)*100);
+        const cond=v>=3?'Cumple':(v>0?'Brecha':'Sin evaluar');
+        const cls=v>=3?'status-ok':(v>0?'status-warn':'status-bad');
+        return `<tr>
+          <td>${c}<br><small class="sub">${DESC[i]}</small></td>
+          <td>${v} / 4</td>
+          <td>${p}%</td>
+          <td class="${cls}"><b>${cond}</b></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Resolución final automática</h3>
+  <table>
+    <tr><th>Operador</th><td>${operador.value||'Sin completar'}</td><th>RUN</th><td>${run.value||'Sin completar'}</td></tr>
+    <tr><th>Equipo</th><td>${equipoSel.e}</td><th>Instructor</th><td>${instructor.value||'Sin completar'}</td></tr>
+    <tr><th>Fecha / Turno</th><td>${fecha.value||''} · ${turno.value}</td><th>Estado equipo</th><td>${data.estadoEquipo||'Operativo'}</td></tr>
+    <tr><th>Nota práctica</th><td>${pct}%</td><th>Nota teórica</th><td>${teo.toFixed(1)}</td></tr>
+    <tr><th>Nota final</th><td><b>${nf.nota.toFixed(1)}</b></td><th>Resultado</th><td><b class="${st[1]}">${st[0]}</b></td></tr>
+  </table>
+
+  <label>Observaciones del instructor</label>
+  <textarea oninput="data.obs=this.value;saveAll(false)" placeholder="Fortalezas, brechas, restricciones, condición de liberación operacional y acciones recomendadas.">${data.obs||''}</textarea>
+
+  <label>Recomendación de liberación operacional</label>
+  <select onchange="data.liberacion=this.value;saveAll(false)">
+    <option ${data.liberacion==='No liberar / requiere reentrenamiento'?'selected':''}>No liberar / requiere reentrenamiento</option>
+    <option ${data.liberacion==='Liberar con acompañamiento'?'selected':''}>Liberar con acompañamiento</option>
+    <option ${data.liberacion==='Liberar operación supervisada'?'selected':''}>Liberar operación supervisada</option>
+    <option ${data.liberacion==='Liberar operación autónoma'?'selected':''}>Liberar operación autónoma</option>
+  </select>
+</div>
+
+<div class="card">
+  <h3>Firmas</h3>
+  <div class="row3">
+    <div><label>Firma operador</label><div style="height:70px;border:1px dashed var(--line);border-radius:12px;background:#081422"></div></div>
+    <div><label>Firma instructor</label><div style="height:70px;border:1px dashed var(--line);border-radius:12px;background:#081422"></div></div>
+    <div><label>Firma jefatura</label><div style="height:70px;border:1px dashed var(--line);border-radius:12px;background:#081422"></div></div>
+  </div>
+</div>`;
+}
+
 function renderBrechas(){let bajas=CRITERIOS.map((c,i)=>({c,v:Number(data['c'+i]||0)})).filter(x=>x.v<3); brechas.innerHTML=`<div class="card"><h2>Plan de cierre de brechas</h2><table><thead><tr><th>Brecha detectada</th><th>Acción recomendada</th><th>Responsable</th><th>Plazo</th></tr></thead><tbody>${(bajas.length?bajas:[{c:'Sin brechas críticas registradas',v:4}]).map(b=>`<tr><td>${b.c}</td><td>${b.v<3?'Reentrenamiento práctico dirigido, observación en terreno y reevaluación.':'Mantener seguimiento preventivo.'}</td><td>Instructor / Jefatura directa</td><td>24 a 72 horas</td></tr>`).join('')}</tbody></table><p class="footer-note">No liberar operador si mantiene controles críticos bajo nivel 3 o incumple asistencia/nota mínima.</p></div>`}
 function exportJSON(){saveAll(false);const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='respaldo_operador_trainee.json';a.click();}
 </script></body></html>
